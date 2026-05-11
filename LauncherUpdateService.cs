@@ -56,7 +56,7 @@ public static class LauncherUpdateService
         }
 
         Directory.CreateDirectory(extractRoot);
-        ZipFile.ExtractToDirectory(packagePath, extractRoot);
+        ExtractZipSafely(packagePath, extractRoot);
         string launcherRoot = FindLauncherRoot(extractRoot);
         if (string.IsNullOrWhiteSpace(launcherRoot))
         {
@@ -150,6 +150,30 @@ Remove-Item -LiteralPath $PSCommandPath -Force
             .Where(directory => !string.IsNullOrWhiteSpace(directory))
             .OrderBy(directory => directory!.Length)
             .FirstOrDefault() ?? string.Empty;
+    }
+
+    private static void ExtractZipSafely(string packagePath, string destinationDirectory)
+    {
+        string destinationRoot = Path.GetFullPath(destinationDirectory);
+        using ZipArchive archive = ZipFile.OpenRead(packagePath);
+        foreach (ZipArchiveEntry entry in archive.Entries)
+        {
+            string destinationPath = Path.GetFullPath(Path.Combine(destinationRoot, entry.FullName));
+            if (!destinationPath.StartsWith(destinationRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
+                !destinationPath.Equals(destinationRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Launcher update package contains an unsafe path.");
+            }
+
+            if (string.IsNullOrEmpty(entry.Name))
+            {
+                Directory.CreateDirectory(destinationPath);
+                continue;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath) ?? destinationRoot);
+            entry.ExtractToFile(destinationPath, overwrite: false);
+        }
     }
 
     private static string ComputeSha256(string path)
