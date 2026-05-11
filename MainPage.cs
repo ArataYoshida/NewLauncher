@@ -677,7 +677,7 @@ public sealed class MainPage : ContentPage
                     : $"Engine {project.EngineVersion} / {FormatLocalTime(project.LastOpenedUtc)}", TextSecondary, 11)
             }
         }, 0, 0);
-        content.Add(CreateButton(T("Delete", "削除"), async (_, _) => await DeleteProjectAsync(project), ButtonTone.Danger), 1, 0);
+        content.Add(CreateDeleteIconButton(async (_, _) => await DeleteProjectAsync(project)), 1, 0);
         content.Add(CreateSelectionBadge(selected), 2, 0);
 
         return CreateSelectableRow(selected, content, () =>
@@ -712,7 +712,7 @@ public sealed class MainPage : ContentPage
                 CreateSmallLabel(engine.Path, TextMuted, 11, maxLines: 1)
             }
         }, 0, 0);
-        Button deleteButton = CreateButton(T("Delete", "削除"), async (_, _) => await DeleteEngineAsync(engine), ButtonTone.Danger);
+        Button deleteButton = CreateDeleteIconButton(async (_, _) => await DeleteEngineAsync(engine));
         deleteButton.IsEnabled = _store.CanDeleteEngine(engine);
         content.Add(deleteButton, 1, 0);
         content.Add(CreateSelectionBadge(selected), 2, 0);
@@ -1454,6 +1454,22 @@ public sealed class MainPage : ContentPage
         return button;
     }
 
+    private static Button CreateDeleteIconButton(EventHandler clicked)
+    {
+        Button button = CreateButton("×", clicked, ButtonTone.Danger);
+        button.FontSize = 16;
+        button.Padding = new Thickness(0);
+        button.WidthRequest = 30;
+        button.HeightRequest = 30;
+        button.MinimumWidthRequest = 30;
+        button.MinimumHeightRequest = 30;
+        button.CornerRadius = 6;
+        button.HorizontalOptions = LayoutOptions.End;
+        button.VerticalOptions = LayoutOptions.Start;
+        SemanticProperties.SetDescription(button, "Delete");
+        return button;
+    }
+
     private static Entry CreateEntry(string placeholder)
     {
         var entry = new Entry
@@ -1668,7 +1684,7 @@ public sealed class MainPage : ContentPage
             ButtonTone.Primary => new ButtonPalette(Accent, AccentHover, AccentPressed, TextOnAccent, TextOnAccent, Accent),
             ButtonTone.Secondary => new ButtonPalette(SurfaceSoft, SurfaceHover, SurfacePressed, TextPrimary, TextPrimary, Accent),
             ButtonTone.Ghost => new ButtonPalette(Surface, SurfaceHover, SurfacePressed, TextSecondary, TextPrimary, Border),
-            ButtonTone.Danger => new ButtonPalette(Surface, SurfaceHover, SurfacePressed, AccentWarm, TextPrimary, AccentWarm),
+            ButtonTone.Danger => new ButtonPalette(SurfaceSoft, SurfaceHover, SurfacePressed, TextMuted, AccentWarm, Border),
             _ => new ButtonPalette(Surface, SurfaceHover, SurfacePressed, TextSecondary, TextPrimary, Border)
         };
     }

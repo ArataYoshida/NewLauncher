@@ -56,7 +56,7 @@ NewLauncher is the Windows launcher for installing and updating NewEngine / NewE
 - Show the selected engine install state, publish date, and package size
 - Create new projects
 - Register existing projects
-- Delete projects and installed Engines with confirmation
+- Delete projects and installed Engines with compact confirmation-protected icon buttons
 - Launch NewEditor with the selected Engine version
 - Open project and Engine folders quickly
 - Switch between Japanese and English UI
