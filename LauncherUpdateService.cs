@@ -124,7 +124,7 @@ public static class LauncherUpdateService
 $ErrorActionPreference = "Stop"
 Wait-Process -Id {{processId}} -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
-Copy-Item -LiteralPath "{{sourceDirectory}}\*" -Destination "{{targetDirectory}}" -Recurse -Force
+Get-ChildItem -LiteralPath "{{sourceDirectory}}" -Force | Copy-Item -Destination "{{targetDirectory}}" -Recurse -Force
 Start-Process -FilePath "{{launcherPath}}"
 Remove-Item -LiteralPath $PSCommandPath -Force
 """;
