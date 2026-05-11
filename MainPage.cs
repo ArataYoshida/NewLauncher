@@ -39,6 +39,7 @@ public sealed class MainPage : ContentPage
     private VerticalStackLayout _engineList = null!;
     private Label _statusLabel = null!;
     private Label _installProgressLabel = null!;
+    private Label _engineUpdateNoticeLabel = null!;
     private ProgressBar _installProgressBar = null!;
     private Picker _releasePicker = null!;
     private Label _selectedProjectTitle = null!;
@@ -50,6 +51,7 @@ public sealed class MainPage : ContentPage
     private Button? _launchButton;
     private Button? _openProjectButton;
     private Button? _openEngineButton;
+    private Button? _openDocumentationButton;
     private Button? _checkReleasesButton;
     private Button? _installReleaseButton;
     private ProjectInfo? _selectedProject;
@@ -58,6 +60,7 @@ public sealed class MainPage : ContentPage
     private LauncherView _currentView = LauncherView.Dashboard;
     private string _lastStatusMessage = string.Empty;
     private bool _checkedLauncherUpdate;
+    private bool _engineUpdateAvailable;
 
     public MainPage()
     {
@@ -92,6 +95,8 @@ public sealed class MainPage : ContentPage
         _engineList = new VerticalStackLayout { Spacing = 10 };
         _statusLabel = CreateSmallLabel(string.Empty, TextSecondary);
         _installProgressLabel = CreateSmallLabel(T("Waiting for install.", "インストール待機中。"), TextMuted, 11, FontAttributes.Bold);
+        _engineUpdateNoticeLabel = CreateSmallLabel(string.Empty, AccentWarm, 13, FontAttributes.Bold);
+        _engineUpdateNoticeLabel.IsVisible = false;
         _installProgressBar = new ProgressBar
         {
             Progress = 0,
@@ -110,6 +115,7 @@ public sealed class MainPage : ContentPage
         _launchButton = null;
         _openProjectButton = null;
         _openEngineButton = null;
+        _openDocumentationButton = null;
         _checkReleasesButton = null;
         _installReleaseButton = null;
         BackgroundColor = WindowBackground;
@@ -243,6 +249,8 @@ public sealed class MainPage : ContentPage
             ColumnSpacing = 24
         };
 
+        _openDocumentationButton = CreateButton(T("Open Documentation", "ドキュメントを開く"), (_, _) => OpenDocumentation(), ButtonTone.Ghost);
+
         hero.Add(new VerticalStackLayout
         {
             Spacing = 10,
@@ -273,7 +281,8 @@ public sealed class MainPage : ContentPage
                 CreateSmallLabel(T("Selected engine", "選択中のエンジン"), TextMuted, 11, FontAttributes.Bold),
                 _selectedEngineTitle,
                 _selectedEngineMeta,
-                _launchButton
+                _launchButton,
+                _openDocumentationButton
             }
         }, 1, 0);
 
@@ -307,6 +316,7 @@ public sealed class MainPage : ContentPage
 
         grid.Add(CreatePanel(CreateSection(T("Updates", "更新"), T("Release channel", "リリースチャンネル"), new View[]
         {
+            _engineUpdateNoticeLabel,
             CreateSmallLabel(T("GitHub release source", "GitHub リリース取得元"), TextMuted, 11, FontAttributes.Bold),
             CreateSmallLabel(_store.ReleaseSourceLabel, TextPrimary, 13, FontAttributes.Bold, maxLines: 2),
             CreateSmallLabel(T("Engine version", "エンジンバージョン"), TextMuted, 11, FontAttributes.Bold),
@@ -332,6 +342,7 @@ public sealed class MainPage : ContentPage
         }), new Thickness(16), Border), 2, 0);
 
         RefreshReleasePicker();
+        RefreshEngineUpdateNotice();
         return grid;
     }
 
@@ -614,6 +625,11 @@ public sealed class MainPage : ContentPage
             _openEngineButton.IsEnabled = _selectedEngine != null;
         }
 
+        if (_openDocumentationButton != null)
+        {
+            _openDocumentationButton.IsEnabled = _selectedEngine != null;
+        }
+
         RefreshInstallButtonState();
     }
 
@@ -844,7 +860,9 @@ public sealed class MainPage : ContentPage
             SetStatus(T("Checking releases...", "リリースを確認しています..."));
             IReadOnlyList<EngineReleaseManifest> releases = await _store.CheckAvailableReleasesAsync();
             _selectedRelease = releases.FirstOrDefault() ?? await _store.CheckLatestReleaseAsync();
+            _engineUpdateAvailable = _selectedRelease != null && !_store.IsEngineInstalled(_selectedRelease);
             RefreshReleasePicker();
+            RefreshEngineUpdateNotice();
             SetStatus(IsJapanese
                 ? $"{releases.Count} 件のリリースを取得しました。"
                 : $"Loaded {releases.Count} releases.");
@@ -873,6 +891,8 @@ public sealed class MainPage : ContentPage
             EngineInstallInfo engine = await _store.InstallReleaseAsync(release, new Progress<EngineInstallProgress>(SetInstallProgress));
             _selectedEngine = engine;
             RefreshLists();
+            _engineUpdateAvailable = _store.LatestRelease != null && !_store.IsEngineInstalled(_store.LatestRelease);
+            RefreshEngineUpdateNotice();
             SetInstallProgress(new EngineInstallProgress(T("Install complete.", "インストール完了。"), 100));
             SetStatus(IsJapanese ? $"エンジン {engine.Version} をインストールしました。" : $"Installed engine {engine.Version}.");
         }
@@ -941,6 +961,26 @@ public sealed class MainPage : ContentPage
         }
     }
 
+    private void RefreshEngineUpdateNotice()
+    {
+        if (_engineUpdateNoticeLabel == null)
+        {
+            return;
+        }
+
+        if (!_engineUpdateAvailable || _store.LatestRelease == null)
+        {
+            _engineUpdateNoticeLabel.IsVisible = false;
+            _engineUpdateNoticeLabel.Text = string.Empty;
+            return;
+        }
+
+        _engineUpdateNoticeLabel.IsVisible = true;
+        _engineUpdateNoticeLabel.Text = IsJapanese
+            ? $"! 最新エンジンがあります: {_store.LatestRelease.Version}"
+            : $"! New engine available: {_store.LatestRelease.Version}";
+    }
+
     private async Task CheckLauncherUpdateOnStartupAsync()
     {
         try
@@ -954,12 +994,37 @@ public sealed class MainPage : ContentPage
             SetStatus(T("Launcher update downloaded. Restarting...", "Launcher 更新を取得しました。再起動します..."));
             await Task.Delay(500);
             Application.Current?.Quit();
+            return;
         }
         catch (Exception ex)
         {
             SetStatus(IsJapanese
                 ? $"Launcher 更新確認に失敗しました: {ex.Message}"
                 : $"Launcher update check failed: {ex.Message}");
+        }
+
+        await CheckEngineUpdateOnStartupAsync();
+    }
+
+    private async Task CheckEngineUpdateOnStartupAsync()
+    {
+        try
+        {
+            SetStatus(T("Checking engine updates...", "エンジン更新を確認しています..."));
+            EngineReleaseManifest latest = await _store.CheckLatestReleaseAsync();
+            _selectedRelease = latest;
+            _engineUpdateAvailable = !_store.IsEngineInstalled(latest);
+            RefreshReleasePicker();
+            RefreshEngineUpdateNotice();
+            SetStatus(_engineUpdateAvailable
+                ? (IsJapanese ? $"最新エンジンがあります: {latest.Version}" : $"New engine available: {latest.Version}")
+                : (IsJapanese ? $"最新エンジンはインストール済みです: {latest.Version}" : $"Latest engine is installed: {latest.Version}"));
+        }
+        catch (Exception ex)
+        {
+            SetStatus(IsJapanese
+                ? $"エンジン更新確認に失敗しました: {ex.Message}"
+                : $"Engine update check failed: {ex.Message}");
         }
     }
 
@@ -1040,6 +1105,73 @@ public sealed class MainPage : ContentPage
         }
 
         OpenFolder(_selectedEngine.Path);
+    }
+
+    private void OpenDocumentation()
+    {
+        if (_selectedEngine == null)
+        {
+            SetStatus(T("Select an engine first.", "先にエンジンを選択してください。"));
+            return;
+        }
+
+        string? documentationIndexPath = FindDocumentationIndexPath(_selectedEngine);
+        if (documentationIndexPath == null)
+        {
+            SetStatus(T("Documentation was not found. Build the engine docs first.", "ドキュメントが見つかりません。先にエンジンの docs を生成してください。"));
+            return;
+        }
+
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = documentationIndexPath,
+            UseShellExecute = true
+        });
+        SetStatus(T("Opened documentation.", "ドキュメントを開きました。"));
+    }
+
+    private static string? FindDocumentationIndexPath(EngineInstallInfo engine)
+    {
+        foreach (string candidate in EnumerateDocumentationIndexCandidates(engine))
+        {
+            if (File.Exists(candidate))
+            {
+                return System.IO.Path.GetFullPath(candidate);
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> EnumerateDocumentationIndexCandidates(EngineInstallInfo engine)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string candidate in new[]
+        {
+            System.IO.Path.Combine(engine.Path, "docs", "index.html"),
+            System.IO.Path.Combine(AppContext.BaseDirectory, "docs", "index.html")
+        })
+        {
+            if (seen.Add(candidate))
+            {
+                yield return candidate;
+            }
+        }
+
+        foreach (string startPath in new[] { engine.Path, AppContext.BaseDirectory, Environment.CurrentDirectory })
+        {
+            var directory = new DirectoryInfo(System.IO.Path.GetFullPath(startPath));
+            while (directory != null)
+            {
+                string candidate = System.IO.Path.Combine(directory.FullName, "build", "bin", "docs", "index.html");
+                if (seen.Add(candidate))
+                {
+                    yield return candidate;
+                }
+
+                directory = directory.Parent;
+            }
+        }
     }
 
     private static void OpenFolder(string path)

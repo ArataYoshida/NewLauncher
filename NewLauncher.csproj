@@ -12,10 +12,10 @@
 		<ApplicationTitle>New Launcher</ApplicationTitle>
 		<ApplicationIcon>Resources\AppIcon\newengine_launcher.ico</ApplicationIcon>
 		<ApplicationId>com.companyname.newlauncher</ApplicationId>
-		<ApplicationDisplayVersion>1.1.0</ApplicationDisplayVersion>
-		<ApplicationVersion>2</ApplicationVersion>
-		<AssemblyVersion>1.1.0.0</AssemblyVersion>
-		<FileVersion>1.1.0.0</FileVersion>
+		<ApplicationDisplayVersion>1.2.0</ApplicationDisplayVersion>
+		<ApplicationVersion>3</ApplicationVersion>
+		<AssemblyVersion>1.2.0.0</AssemblyVersion>
+		<FileVersion>1.2.0.0</FileVersion>
 		<WindowsPackageType>None</WindowsPackageType>
 		<WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
 		<SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
