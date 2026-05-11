@@ -40,6 +40,8 @@ public sealed class MainPage : ContentPage
     private Label _statusLabel = null!;
     private Label _installProgressLabel = null!;
     private Label _engineUpdateNoticeLabel = null!;
+    private Label _engineReleaseStatusLabel = null!;
+    private Label _selectedReleaseDetailsLabel = null!;
     private ProgressBar _installProgressBar = null!;
     private Picker _releasePicker = null!;
     private Label _selectedProjectTitle = null!;
@@ -97,6 +99,13 @@ public sealed class MainPage : ContentPage
         _installProgressLabel = CreateSmallLabel(T("Waiting for install.", "インストール待機中。"), TextMuted, 11, FontAttributes.Bold);
         _engineUpdateNoticeLabel = CreateSmallLabel(string.Empty, AccentWarm, 13, FontAttributes.Bold);
         _engineUpdateNoticeLabel.IsVisible = false;
+        _engineReleaseStatusLabel = CreateSmallLabel(
+            T("Startup checks the latest engine automatically.", "起動時に最新エンジンを自動確認します。"),
+            TextSecondary);
+        _selectedReleaseDetailsLabel = CreateSmallLabel(
+            T("Select a release to see details.", "リリースを選択すると詳細を表示します。"),
+            TextMuted,
+            11);
         _installProgressBar = new ProgressBar
         {
             Progress = 0,
@@ -317,10 +326,12 @@ public sealed class MainPage : ContentPage
         grid.Add(CreatePanel(CreateSection(T("Updates", "更新"), T("Release channel", "リリースチャンネル"), new View[]
         {
             _engineUpdateNoticeLabel,
+            _engineReleaseStatusLabel,
             CreateSmallLabel(T("GitHub release source", "GitHub リリース取得元"), TextMuted, 11, FontAttributes.Bold),
             CreateSmallLabel(_store.ReleaseSourceLabel, TextPrimary, 13, FontAttributes.Bold, maxLines: 2),
             CreateSmallLabel(T("Engine version", "エンジンバージョン"), TextMuted, 11, FontAttributes.Bold),
             _releasePicker,
+            _selectedReleaseDetailsLabel,
             new Grid
             {
                 ColumnDefinitions =
@@ -341,8 +352,14 @@ public sealed class MainPage : ContentPage
             _statusLabel
         }), new Thickness(16), Border), 2, 0);
 
+        if (_store.LatestRelease != null)
+        {
+            _engineUpdateAvailable = !_store.IsEngineInstalled(_store.LatestRelease);
+        }
+
         RefreshReleasePicker();
         RefreshEngineUpdateNotice();
+        RefreshEngineReleaseStatusFromCache();
         return grid;
     }
 
@@ -857,18 +874,23 @@ public sealed class MainPage : ContentPage
     {
         try
         {
+            SetEngineReleaseStatus(T("Checking engine releases...", "エンジンリリースを確認しています..."), TextSecondary);
             SetStatus(T("Checking releases...", "リリースを確認しています..."));
             IReadOnlyList<EngineReleaseManifest> releases = await _store.CheckAvailableReleasesAsync();
             _selectedRelease = releases.FirstOrDefault() ?? await _store.CheckLatestReleaseAsync();
-            _engineUpdateAvailable = _selectedRelease != null && !_store.IsEngineInstalled(_selectedRelease);
+            _engineUpdateAvailable = _store.LatestRelease != null && !_store.IsEngineInstalled(_store.LatestRelease);
             RefreshReleasePicker();
             RefreshEngineUpdateNotice();
+            SetEngineReleaseStatus(GetReleaseCheckStatusMessage(releases.Count), _engineUpdateAvailable ? AccentWarm : TextSecondary);
             SetStatus(IsJapanese
                 ? $"{releases.Count} 件のリリースを取得しました。"
                 : $"Loaded {releases.Count} releases.");
         }
         catch (Exception ex)
         {
+            SetEngineReleaseStatus(
+                IsJapanese ? $"エンジンリリース確認に失敗しました: {ex.Message}" : $"Engine release check failed: {ex.Message}",
+                AccentWarm);
             SetStatus(ex.Message);
         }
     }
@@ -882,6 +904,7 @@ public sealed class MainPage : ContentPage
             if (_store.IsEngineInstalled(release))
             {
                 RefreshInstallButtonState();
+                RefreshSelectedReleaseDetails();
                 SetInstallProgress(new EngineInstallProgress(T("Already installed.", "インストール済みです。"), 100));
                 SetStatus(IsJapanese ? $"{release.Version} はインストール済みです。" : $"{release.Version} is already installed.");
                 return;
@@ -893,6 +916,9 @@ public sealed class MainPage : ContentPage
             RefreshLists();
             _engineUpdateAvailable = _store.LatestRelease != null && !_store.IsEngineInstalled(_store.LatestRelease);
             RefreshEngineUpdateNotice();
+            RefreshSelectedReleaseDetails();
+            EngineReleaseManifest statusRelease = _store.LatestRelease ?? release;
+            SetEngineReleaseStatus(GetLatestEngineStatusMessage(statusRelease), _engineUpdateAvailable ? AccentWarm : TextSecondary);
             SetInstallProgress(new EngineInstallProgress(T("Install complete.", "インストール完了。"), 100));
             SetStatus(IsJapanese ? $"エンジン {engine.Version} をインストールしました。" : $"Installed engine {engine.Version}.");
         }
@@ -928,6 +954,7 @@ public sealed class MainPage : ContentPage
             _releasePicker.Items.Add(T("Check releases first", "先にリリース確認"));
             _releasePicker.SelectedIndex = 0;
             RefreshInstallButtonState();
+            RefreshSelectedReleaseDetails();
             return;
         }
 
@@ -936,6 +963,7 @@ public sealed class MainPage : ContentPage
         _selectedRelease = releases[selectedIndex];
         _releasePicker.SelectedIndex = selectedIndex;
         RefreshInstallButtonState();
+        RefreshSelectedReleaseDetails();
     }
 
     private void RefreshInstallButtonState()
@@ -959,6 +987,82 @@ public sealed class MainPage : ContentPage
         {
             _installProgressLabel.Text = T("Selected version is installed.", "選択中のバージョンはインストール済みです。");
         }
+    }
+
+    private void RefreshSelectedReleaseDetails()
+    {
+        if (_selectedReleaseDetailsLabel == null)
+        {
+            return;
+        }
+
+        if (_selectedRelease == null)
+        {
+            _selectedReleaseDetailsLabel.Text = T("No engine release selected.", "エンジンリリース未選択です。");
+            _selectedReleaseDetailsLabel.TextColor = TextMuted;
+            return;
+        }
+
+        bool installed = _store.IsEngineInstalled(_selectedRelease);
+        string installState = installed ? T("Installed", "インストール済み") : T("Not installed", "未インストール");
+        string publishedAt = _selectedRelease.PublishedAtUtc == default
+            ? T("unknown", "不明")
+            : FormatLocalTime(_selectedRelease.PublishedAtUtc);
+        string packageSize = _selectedRelease.SizeBytes > 0
+            ? FormatBytesForUi(_selectedRelease.SizeBytes)
+            : T("unknown size", "サイズ不明");
+
+        _selectedReleaseDetailsLabel.Text = IsJapanese
+            ? $"選択中: {_selectedRelease.Version} / {_selectedRelease.Channel} / {installState}\n公開: {publishedAt} / サイズ: {packageSize}"
+            : $"Selected: {_selectedRelease.Version} / {_selectedRelease.Channel} / {installState}\nPublished: {publishedAt} / Size: {packageSize}";
+        _selectedReleaseDetailsLabel.TextColor = installed ? TextSecondary : TextPrimary;
+    }
+
+    private void SetEngineReleaseStatus(string message, Color color)
+    {
+        if (_engineReleaseStatusLabel == null)
+        {
+            return;
+        }
+
+        _engineReleaseStatusLabel.Text = message;
+        _engineReleaseStatusLabel.TextColor = color;
+    }
+
+    private string GetReleaseCheckStatusMessage(int releaseCount)
+    {
+        if (_store.LatestRelease == null)
+        {
+            return T("No installable engine release was found.", "インストール可能なエンジンリリースが見つかりません。");
+        }
+
+        string latestStatus = _engineUpdateAvailable
+            ? T("new engine available", "最新エンジンあり")
+            : T("latest installed", "最新インストール済み");
+        return IsJapanese
+            ? $"確認済み: {releaseCount} 件 / 最新 {_store.LatestRelease.Version} / {latestStatus}"
+            : $"Checked: {releaseCount} releases / Latest {_store.LatestRelease.Version} / {latestStatus}";
+    }
+
+    private string GetLatestEngineStatusMessage(EngineReleaseManifest latest)
+    {
+        bool installed = _store.IsEngineInstalled(latest);
+        return installed
+            ? (IsJapanese ? $"最新エンジンはインストール済みです: {latest.Version}" : $"Latest engine is installed: {latest.Version}")
+            : (IsJapanese ? $"最新エンジンがあります: {latest.Version}" : $"New engine available: {latest.Version}");
+    }
+
+    private void RefreshEngineReleaseStatusFromCache()
+    {
+        if (_store.LatestRelease == null)
+        {
+            return;
+        }
+
+        string message = _store.AvailableReleases.Count > 0
+            ? GetReleaseCheckStatusMessage(_store.AvailableReleases.Count)
+            : GetLatestEngineStatusMessage(_store.LatestRelease);
+        SetEngineReleaseStatus(message, _engineUpdateAvailable ? AccentWarm : TextSecondary);
     }
 
     private void RefreshEngineUpdateNotice()
@@ -986,15 +1090,13 @@ public sealed class MainPage : ContentPage
         try
         {
             bool updateStarted = await LauncherUpdateService.CheckAndStartUpdateAsync(new Progress<string>(SetStatus));
-            if (!updateStarted)
+            if (updateStarted)
             {
+                SetStatus(T("Launcher update downloaded. Restarting...", "Launcher 更新を取得しました。再起動します..."));
+                await Task.Delay(500);
+                Application.Current?.Quit();
                 return;
             }
-
-            SetStatus(T("Launcher update downloaded. Restarting...", "Launcher 更新を取得しました。再起動します..."));
-            await Task.Delay(500);
-            Application.Current?.Quit();
-            return;
         }
         catch (Exception ex)
         {
@@ -1010,18 +1112,21 @@ public sealed class MainPage : ContentPage
     {
         try
         {
+            SetEngineReleaseStatus(T("Checking latest engine on startup...", "起動時の最新エンジン確認中..."), TextSecondary);
             SetStatus(T("Checking engine updates...", "エンジン更新を確認しています..."));
             EngineReleaseManifest latest = await _store.CheckLatestReleaseAsync();
             _selectedRelease = latest;
             _engineUpdateAvailable = !_store.IsEngineInstalled(latest);
             RefreshReleasePicker();
             RefreshEngineUpdateNotice();
-            SetStatus(_engineUpdateAvailable
-                ? (IsJapanese ? $"最新エンジンがあります: {latest.Version}" : $"New engine available: {latest.Version}")
-                : (IsJapanese ? $"最新エンジンはインストール済みです: {latest.Version}" : $"Latest engine is installed: {latest.Version}"));
+            SetEngineReleaseStatus(GetLatestEngineStatusMessage(latest), _engineUpdateAvailable ? AccentWarm : TextSecondary);
+            SetStatus(GetLatestEngineStatusMessage(latest));
         }
         catch (Exception ex)
         {
+            SetEngineReleaseStatus(
+                IsJapanese ? $"起動時のエンジン確認に失敗しました: {ex.Message}" : $"Startup engine check failed: {ex.Message}",
+                AccentWarm);
             SetStatus(IsJapanese
                 ? $"エンジン更新確認に失敗しました: {ex.Message}"
                 : $"Engine update check failed: {ex.Message}");
@@ -1325,6 +1430,7 @@ public sealed class MainPage : ContentPage
 
             _selectedRelease = releases[picker.SelectedIndex];
             RefreshInstallButtonState();
+            RefreshSelectedReleaseDetails();
         };
         return picker;
     }
@@ -1366,6 +1472,20 @@ public sealed class MainPage : ContentPage
         }
 
         return utcTime.ToLocalTime().ToString("yyyy/MM/dd HH:mm");
+    }
+
+    private static string FormatBytesForUi(long bytes)
+    {
+        string[] units = { "B", "KB", "MB", "GB" };
+        double value = bytes;
+        int unitIndex = 0;
+        while (value >= 1024 && unitIndex < units.Length - 1)
+        {
+            value /= 1024;
+            unitIndex++;
+        }
+
+        return $"{value:0.#} {units[unitIndex]}";
     }
 
     private void ApplyAppearancePreference()
