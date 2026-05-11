@@ -43,7 +43,7 @@ public sealed class MainPage : ContentPage
     private Label _engineReleaseStatusLabel = null!;
     private Label _selectedReleaseDetailsLabel = null!;
     private ProgressBar _installProgressBar = null!;
-    private Picker _releasePicker = null!;
+    private Button? _releaseSelectorButton;
     private Label _selectedProjectTitle = null!;
     private Label _selectedProjectMeta = null!;
     private Label _selectedEngineTitle = null!;
@@ -114,7 +114,7 @@ public sealed class MainPage : ContentPage
             HeightRequest = 8,
             IsVisible = false
         };
-        _releasePicker = CreateReleasePicker();
+        _releaseSelectorButton = null;
         _selectedProjectTitle = CreateSmallLabel(T("No project selected", "プロジェクト未選択"), TextPrimary, 22, FontAttributes.Bold);
         _selectedProjectMeta = CreateSmallLabel(T("Create or add a project to begin.", "開始するにはプロジェクトを作成または追加してください。"), TextSecondary);
         _selectedEngineTitle = CreateSmallLabel(T("No engine selected", "エンジン未選択"), TextPrimary, 14, FontAttributes.Bold);
@@ -330,7 +330,7 @@ public sealed class MainPage : ContentPage
             CreateSmallLabel(T("GitHub release source", "GitHub リリース取得元"), TextMuted, 11, FontAttributes.Bold),
             CreateSmallLabel(_store.ReleaseSourceLabel, TextPrimary, 13, FontAttributes.Bold, maxLines: 2),
             CreateSmallLabel(T("Engine version", "エンジンバージョン"), TextMuted, 11, FontAttributes.Bold),
-            _releasePicker,
+            _releaseSelectorButton = CreateButton(GetReleaseSelectorText(), async (_, _) => await SelectReleaseAsync(), ButtonTone.Ghost),
             _selectedReleaseDetailsLabel,
             new Grid
             {
@@ -932,27 +932,17 @@ public sealed class MainPage : ContentPage
 
     private void RefreshReleasePicker()
     {
-        if (_releasePicker == null)
+        if (_releaseSelectorButton == null)
         {
             return;
         }
 
-        IReadOnlyList<EngineReleaseManifest> releases = _store.AvailableReleases.Count > 0
-            ? _store.AvailableReleases
-            : _store.LatestRelease == null ? Array.Empty<EngineReleaseManifest>() : new[] { _store.LatestRelease };
-        _releasePicker.Items.Clear();
-        foreach (EngineReleaseManifest release in releases)
-        {
-            string installedSuffix = _store.IsEngineInstalled(release)
-                ? T(" / installed", " / インストール済み")
-                : string.Empty;
-            _releasePicker.Items.Add($"{release.Version} ({release.Channel}){installedSuffix}");
-        }
-
+        IReadOnlyList<EngineReleaseManifest> releases = GetSelectableReleases();
         if (releases.Count == 0)
         {
-            _releasePicker.Items.Add(T("Check releases first", "先にリリース確認"));
-            _releasePicker.SelectedIndex = 0;
+            _selectedRelease = null;
+            _releaseSelectorButton.Text = GetReleaseSelectorText();
+            _releaseSelectorButton.IsEnabled = false;
             RefreshInstallButtonState();
             RefreshSelectedReleaseDetails();
             return;
@@ -961,7 +951,8 @@ public sealed class MainPage : ContentPage
         int selectedIndex = Math.Max(0, releases.ToList().FindIndex(release =>
             string.Equals(release.Version, _selectedRelease?.Version, StringComparison.OrdinalIgnoreCase)));
         _selectedRelease = releases[selectedIndex];
-        _releasePicker.SelectedIndex = selectedIndex;
+        _releaseSelectorButton.Text = GetReleaseSelectorText();
+        _releaseSelectorButton.IsEnabled = true;
         RefreshInstallButtonState();
         RefreshSelectedReleaseDetails();
     }
@@ -1407,32 +1398,60 @@ public sealed class MainPage : ContentPage
         return entry;
     }
 
-    private Picker CreateReleasePicker()
+    private async Task SelectReleaseAsync()
     {
-        var picker = new Picker
+        IReadOnlyList<EngineReleaseManifest> releases = GetSelectableReleases();
+        if (releases.Count == 0)
         {
-            Title = T("Check releases first", "先にリリース確認"),
-            FontSize = 12,
-            TextColor = TextPrimary,
-            TitleColor = TextMuted,
-            BackgroundColor = EntrySurface,
-            HeightRequest = 38
-        };
-        picker.SelectedIndexChanged += (_, _) =>
-        {
-            IReadOnlyList<EngineReleaseManifest> releases = _store.AvailableReleases.Count > 0
-                ? _store.AvailableReleases
-                : _store.LatestRelease == null ? Array.Empty<EngineReleaseManifest>() : new[] { _store.LatestRelease };
-            if (picker.SelectedIndex < 0 || picker.SelectedIndex >= releases.Count)
-            {
-                return;
-            }
+            SetStatus(T("Check releases first.", "先にリリース確認をしてください。"));
+            return;
+        }
 
-            _selectedRelease = releases[picker.SelectedIndex];
-            RefreshInstallButtonState();
-            RefreshSelectedReleaseDetails();
-        };
-        return picker;
+        string[] choices = releases.Select(FormatReleaseChoice).ToArray();
+        string cancel = T("Cancel", "キャンセル");
+        string? selectedChoice = await DisplayActionSheetAsync(
+            T("Select engine version", "エンジンバージョンを選択"),
+            cancel,
+            null,
+            choices);
+        if (string.IsNullOrWhiteSpace(selectedChoice) || string.Equals(selectedChoice, cancel, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        int selectedIndex = Array.IndexOf(choices, selectedChoice);
+        if (selectedIndex < 0 || selectedIndex >= releases.Count)
+        {
+            return;
+        }
+
+        _selectedRelease = releases[selectedIndex];
+        RefreshReleasePicker();
+        SetStatus(IsJapanese
+            ? $"エンジン {_selectedRelease.Version} を選択しました。"
+            : $"Selected engine {_selectedRelease.Version}.");
+    }
+
+    private IReadOnlyList<EngineReleaseManifest> GetSelectableReleases()
+    {
+        return _store.AvailableReleases.Count > 0
+            ? _store.AvailableReleases
+            : _store.LatestRelease == null ? Array.Empty<EngineReleaseManifest>() : new[] { _store.LatestRelease };
+    }
+
+    private string GetReleaseSelectorText()
+    {
+        return _selectedRelease == null
+            ? T("Check releases first", "先にリリース確認")
+            : $"{FormatReleaseChoice(_selectedRelease)}  v";
+    }
+
+    private string FormatReleaseChoice(EngineReleaseManifest release)
+    {
+        string installedSuffix = _store.IsEngineInstalled(release)
+            ? T(" / installed", " / インストール済み")
+            : string.Empty;
+        return $"{release.Version} ({release.Channel}){installedSuffix}";
     }
 
     private static Label CreateEyebrow(string text)
