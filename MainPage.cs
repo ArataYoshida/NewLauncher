@@ -659,6 +659,7 @@ public sealed class MainPage : ContentPage
             ColumnDefinitions =
             {
                 new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Auto),
                 new ColumnDefinition(GridLength.Auto)
             },
             ColumnSpacing = 10
@@ -676,7 +677,8 @@ public sealed class MainPage : ContentPage
                     : $"Engine {project.EngineVersion} / {FormatLocalTime(project.LastOpenedUtc)}", TextSecondary, 11)
             }
         }, 0, 0);
-        content.Add(CreateSelectionBadge(selected), 1, 0);
+        content.Add(CreateButton(T("Delete", "削除"), async (_, _) => await DeleteProjectAsync(project), ButtonTone.Danger), 1, 0);
+        content.Add(CreateSelectionBadge(selected), 2, 0);
 
         return CreateSelectableRow(selected, content, () =>
         {
@@ -694,6 +696,7 @@ public sealed class MainPage : ContentPage
             ColumnDefinitions =
             {
                 new ColumnDefinition(GridLength.Star),
+                new ColumnDefinition(GridLength.Auto),
                 new ColumnDefinition(GridLength.Auto)
             },
             ColumnSpacing = 10
@@ -709,7 +712,10 @@ public sealed class MainPage : ContentPage
                 CreateSmallLabel(engine.Path, TextMuted, 11, maxLines: 1)
             }
         }, 0, 0);
-        content.Add(CreateSelectionBadge(selected), 1, 0);
+        Button deleteButton = CreateButton(T("Delete", "削除"), async (_, _) => await DeleteEngineAsync(engine), ButtonTone.Danger);
+        deleteButton.IsEnabled = _store.CanDeleteEngine(engine);
+        content.Add(deleteButton, 1, 0);
+        content.Add(CreateSelectionBadge(selected), 2, 0);
 
         return CreateSelectableRow(selected, content, () =>
         {
@@ -846,6 +852,72 @@ public sealed class MainPage : ContentPage
         catch (Exception ex)
         {
             await DisplayAlertAsync(T("Add Project", "プロジェクト追加"), ex.Message, "OK");
+        }
+    }
+
+    private async Task DeleteProjectAsync(ProjectInfo project)
+    {
+        bool confirmed = await DisplayAlertAsync(
+            T("Delete Project", "プロジェクト削除"),
+            IsJapanese
+                ? $"プロジェクトをフォルダごと削除しますか？\n\n{project.ProjectName}\n{project.Path}"
+                : $"Delete this project folder permanently?\n\n{project.ProjectName}\n{project.Path}",
+            T("Delete", "削除"),
+            T("Cancel", "キャンセル"));
+        if (!confirmed)
+        {
+            return;
+        }
+
+        try
+        {
+            _store.DeleteProject(project);
+            _selectedProject = _store.Settings.Projects.FirstOrDefault();
+            RefreshLists();
+            SetStatus(IsJapanese ? $"プロジェクトを削除しました: {project.ProjectName}" : $"Deleted project: {project.ProjectName}");
+        }
+        catch (Exception ex)
+        {
+            await DisplayAlertAsync(T("Delete Project", "プロジェクト削除"), ex.Message, "OK");
+            SetStatus(IsJapanese ? $"プロジェクト削除に失敗しました: {ex.Message}" : $"Project delete failed: {ex.Message}");
+        }
+    }
+
+    private async Task DeleteEngineAsync(EngineInstallInfo engine)
+    {
+        if (!_store.CanDeleteEngine(engine))
+        {
+            SetStatus(T("Local development engines cannot be deleted here.", "ローカル開発エンジンはここでは削除できません。"));
+            return;
+        }
+
+        bool confirmed = await DisplayAlertAsync(
+            T("Delete Engine", "エンジン削除"),
+            IsJapanese
+                ? $"エンジンをフォルダごと削除しますか？\n\n{engine.Version}\n{engine.Path}"
+                : $"Delete this engine folder permanently?\n\n{engine.Version}\n{engine.Path}",
+            T("Delete", "削除"),
+            T("Cancel", "キャンセル"));
+        if (!confirmed)
+        {
+            return;
+        }
+
+        try
+        {
+            _store.DeleteEngine(engine);
+            _selectedEngine = _store.Settings.Engines.FirstOrDefault();
+            _engineUpdateAvailable = _store.LatestRelease != null && !_store.IsEngineInstalled(_store.LatestRelease);
+            RefreshLists();
+            RefreshReleasePicker();
+            RefreshEngineUpdateNotice();
+            RefreshEngineReleaseStatusFromCache();
+            SetStatus(IsJapanese ? $"エンジンを削除しました: {engine.Version}" : $"Deleted engine: {engine.Version}");
+        }
+        catch (Exception ex)
+        {
+            await DisplayAlertAsync(T("Delete Engine", "エンジン削除"), ex.Message, "OK");
+            SetStatus(IsJapanese ? $"エンジン削除に失敗しました: {ex.Message}" : $"Engine delete failed: {ex.Message}");
         }
     }
 
@@ -1596,6 +1668,7 @@ public sealed class MainPage : ContentPage
             ButtonTone.Primary => new ButtonPalette(Accent, AccentHover, AccentPressed, TextOnAccent, TextOnAccent, Accent),
             ButtonTone.Secondary => new ButtonPalette(SurfaceSoft, SurfaceHover, SurfacePressed, TextPrimary, TextPrimary, Accent),
             ButtonTone.Ghost => new ButtonPalette(Surface, SurfaceHover, SurfacePressed, TextSecondary, TextPrimary, Border),
+            ButtonTone.Danger => new ButtonPalette(Surface, SurfaceHover, SurfacePressed, AccentWarm, TextPrimary, AccentWarm),
             _ => new ButtonPalette(Surface, SurfaceHover, SurfacePressed, TextSecondary, TextPrimary, Border)
         };
     }
@@ -1714,7 +1787,8 @@ public sealed class MainPage : ContentPage
     {
         Primary,
         Secondary,
-        Ghost
+        Ghost,
+        Danger
     }
 
     private enum LauncherView

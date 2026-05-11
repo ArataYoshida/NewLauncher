@@ -51,6 +51,45 @@ public sealed class LauncherStore
         File.WriteAllText(SettingsPath, JsonSerializer.Serialize(Settings, JsonOptions));
     }
 
+    public void DeleteProject(ProjectInfo project)
+    {
+        if (Directory.Exists(project.Path) && !File.Exists(Path.Combine(project.Path, "NewProject.json")))
+        {
+            throw new InvalidOperationException("Project manifest NewProject.json was not found. Refusing to delete the folder.");
+        }
+
+        DeleteDirectoryIfPresent(project.Path);
+        Settings.Projects.RemoveAll(existing =>
+            string.Equals(Path.GetFullPath(existing.Path), Path.GetFullPath(project.Path), StringComparison.OrdinalIgnoreCase));
+        Save();
+    }
+
+    public void DeleteEngine(EngineInstallInfo engine)
+    {
+        if (!CanDeleteEngine(engine))
+        {
+            throw new InvalidOperationException("Local development engines cannot be deleted from the launcher.");
+        }
+
+        DeleteDirectoryIfPresent(engine.Path);
+        Settings.Engines.RemoveAll(existing =>
+            string.Equals(existing.Version, engine.Version, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Path.GetFullPath(existing.Path), Path.GetFullPath(engine.Path), StringComparison.OrdinalIgnoreCase));
+        Save();
+    }
+
+    public bool CanDeleteEngine(EngineInstallInfo engine)
+    {
+        if (string.Equals(engine.Version, "local-dev", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        string enginePath = Path.GetFullPath(engine.Path);
+        string enginesRoot = Path.GetFullPath(EnginesRoot);
+        return enginePath.StartsWith(enginesRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
     public ProjectInfo CreateProject(string requestedName, EngineInstallInfo? engine)
     {
         string projectName = SanitizeProjectName(requestedName);
@@ -764,5 +803,22 @@ public sealed class LauncherStore
         catch
         {
         }
+    }
+
+    private static void DeleteDirectoryIfPresent(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+        {
+            return;
+        }
+
+        string fullPath = Path.GetFullPath(path);
+        string rootPath = Path.GetPathRoot(fullPath) ?? string.Empty;
+        if (string.Equals(fullPath.TrimEnd(Path.DirectorySeparatorChar), rootPath.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Refusing to delete a drive root.");
+        }
+
+        Directory.Delete(fullPath, recursive: true);
     }
 }
